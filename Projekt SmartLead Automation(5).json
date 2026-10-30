@@ -1,0 +1,623 @@
+{
+  "name": "Projekt SmartLead Automation",
+  "nodes": [
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "n8n-nodes-base.emailReadImap",
+      "typeVersion": 2.1,
+      "position": [
+        -208,
+        592
+      ],
+      "id": "63833283-a8c5-45b2-94f3-f2f8df17e578",
+      "name": "Email Trigger (IMAP)",
+      "credentials": {
+        "imap": {
+          "id": "DiZ3Z90qsn7bjja8",
+          "name": "IMAP account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "gpt-4o-mini",
+          "mode": "list",
+          "cachedResultName": "GPT-4O-MINI"
+        },
+        "responses": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=jsi extrakční asistent. Z následujícího textu e-mailu extrahuj lokalitu nemovitosti, jméno klienta a typ poptávky. Výstup musí být validní JSON ve formátu: \nKazda hodnota bude ulozena jako jednotliva promenna \n{\"adresa_nemovitosti\": \"string\", \"typ_nemovitosti\": \"string\", \"telefonni_cislo\": \"string\", \"velikost_pozemku_m2\": \"number\", \"obytna_plocha_m2\": \"number\"}. \nPokud adresa_nemovitosti není uvedena, vrať null. Žádný další text ani markdown......takhle mame prompt pro chata a potrebujeme tam mit tyhle udaje: adresa_nemovitosti, typ_nemovitosti_telefonni_cislo, velikost_pozemku_m2, obytna_plocha_m2,\n\n"
+            },
+            {
+              "content": "={{ $json.obsah }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {
+          "textFormat": {
+            "textOptions": {
+              "type": "json_object"
+            }
+          }
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 2,
+      "position": [
+        0,
+        592
+      ],
+      "id": "79fd0a23-e690-4474-b853-ea7c681db038",
+      "name": "Message a model",
+      "alwaysOutputData": false,
+      "credentials": {
+        "openAiApi": {
+          "id": "ByhqedJ0ioFSOpZR",
+          "name": "OpenAi account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "raw",
+        "jsonOutput": "={{ $json.output[0].content[0].text}}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        512,
+        592
+      ],
+      "id": "9899938d-9d2d-48d3-a5c2-37bad476fb7e",
+      "name": "Edit Fields"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Vstup: $input.item.json.lokalita (z OpenAI)\n// Vstup: items (řádky z Google Sheets - Makléři)\n\nconst poptavanaLokalita = $('OpenAI').first().json.lokalita.toLowerCase().trim();\nconst vsichniMakleri = items;\n\n// 1. Filtrace podle území a statusu\nlet vhodniKandidati = vsichniMakleri.filter(makler => {\n  const status = makler.json.status;\n  if (status!== 'Aktivní') return false;\n\n  const uzemiMaklere = makler.json.uzemi? makler.json.uzemi.toLowerCase() : \"\";\n  // Jednoduchá kontrola substringu (lze vylepšit o přesnější shodu)\n  return uzemiMaklere.includes(poptavanaLokalita);\n});\n\n// Pokud není nalezen žádný makléř, vyhodíme chybu nebo přiřadíme manažerovi\nif (vhodniKandidati.length === 0) {\n  return [{\n    json: {\n      found: false,\n      error: \"Žádný makléř pro tuto lokalitu\"\n    }\n  }];\n}\n\n// 2. Řazení kandidátů\n// Primárně: Preference (5 je nejvíc) -> Sestupně\n// Sekundárně: Čas posledního leadu (nejstarší první) -> Vzestupně\nvhodniKandidati.sort((a, b) => {\n  const prefA = parseInt(a.json.preference |\n\n| 0);\n  const prefB = parseInt(b.json.preference |\n\n| 0);\n\n  // Rozdíl preferencí\n  if (prefB!== prefA) {\n    return prefB - prefA;\n  }\n\n  // Pokud jsou preference stejné, rozhoduje čas\n  const timeA = new Date(a.json.posledni_lead |\n\n| 0).getTime();\n  const timeB = new Date(b.json.posledni_lead |\n\n| 0).getTime();\n  return timeA - timeB;\n});\n\n// 3. Výběr vítěze\nconst vitez = vhodniKandidati;\n\nreturn [{\n  json: {\n    found: true,\n    id_maklere: vitez.json.id_maklere,\n    jmeno: vitez.json.jmeno,\n    telefon: vitez.json.telefon,\n    row_number: vitez.json.row_number // Potřeba pro update\n  }\n}];"
+      },
+      "type": "@n8n/n8n-nodes-langchain.toolCode",
+      "typeVersion": 1.3,
+      "position": [
+        -16,
+        1088
+      ],
+      "id": "94c0809f-608e-4e5c-8130-eca457304470",
+      "name": "Code Tool"
+    },
+    {
+      "parameters": {
+        "url": "https://api.mapy.cz/v1/geocode",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "query",
+              "value": "={{ $('Edit Fields').item.json.adresa_nemovitosti }}"
+            },
+            {
+              "name": "apikey",
+              "value": "0jkHQr7cIdjSPRiay742MkHYn11YED3o5a9Wn01caU4"
+            },
+            {
+              "name": "lang",
+              "value": "cs"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.3,
+      "position": [
+        688,
+        592
+      ],
+      "id": "3d966703-b900-413a-9f26-29a18988ca0f",
+      "name": "HTTP Request"
+    },
+    {
+      "parameters": {
+        "documentId": {
+          "__rl": true,
+          "value": "1ttxfpiwFff5sTQEmbvlZIu5A0u9VVka3cpwJFKEqVBk",
+          "mode": "list",
+          "cachedResultName": "Makleri_Test",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ttxfpiwFff5sTQEmbvlZIu5A0u9VVka3cpwJFKEqVBk/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1ttxfpiwFff5sTQEmbvlZIu5A0u9VVka3cpwJFKEqVBk/edit#gid=0"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        928,
+        592
+      ],
+      "id": "e05487dc-592f-4a06-a0a5-a2c69928ad39",
+      "name": "Makléři",
+      "retryOnFail": true,
+      "maxTries": 5,
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "EqyiUzUpit2fP5dy",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// 1. ZÍSKÁNÍ SOUŘADNIC NEMOVITOSTI\nconst mapNode = $('HTTP Request').first();\n\nif (!mapNode || !mapNode.json.items || mapNode.json.items.length === 0) {\n  return { json: { error: \"Chyba: Mapy.cz nenašly adresu.\" } };\n}\n\nconst targetLat = mapNode.json.items[0].position.lat;\nconst targetLon = mapNode.json.items[0].position.lon;\n\n// 2. NAČTENÍ MAKLÉŘŮ\nconst brokers = $input.all();\n\n// 3. FUNKCE PRO VÝPOČET VZDÁLENOSTI\nfunction getDistance(lat1, lon1, lat2, lon2) {\n  const R = 6371; \n  const dLat = (lat2 - lat1) * Math.PI / 180;\n  const dLon = (lon2 - lon1) * Math.PI / 180;\n  const a =\n    Math.sin(dLat / 2) * Math.sin(dLat / 2) +\n    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *\n    Math.sin(dLon / 2) * Math.sin(dLon / 2);\n  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));\n  return R * c;\n}\n\n// 4. VÝPOČET VZDÁLENOSTI A PŘÍPRAVA DAT\nconst results = brokers.map(broker => {\n  const data = broker.json;\n  \n  // Kompetence: 1 nejlepší, 5 nejhorší. Prázdné = 99 (poslední)\n  const competence = data.A ? parseInt(data.A) : 99;\n\n  let bLat = parseFloat((data.sirka || '0').toString().replace(',', '.'));\n  let bLon = parseFloat((data.delka || '0').toString().replace(',', '.'));\n\n  if (!bLat || !bLon) {\n    return { ...data, distance_km: 99999, kompetence_hodnota: competence };\n  }\n\n  const dist = getDistance(targetLat, targetLon, bLat, bLon);\n  return { \n    ...data, \n    distance_km: Math.round(dist * 100) / 100, \n    kompetence_hodnota: competence \n  };\n});\n\n// 5. SEŘAZENÍ (Zóny po 1 km, v rámci zóny podle kompetence)\nresults.sort((a, b) => {\n  // Vytvoříme zóny (0-1km = zóna 0, 1-2km = zóna 1, atd.)\n  const zoneA = Math.floor(a.distance_km);\n  const zoneB = Math.floor(b.distance_km);\n\n  // Pokud jsou v jiných zónách, řadíme podle vzdálenosti (bližší zóna vyhrává)\n  if (zoneA !== zoneB) {\n    return zoneA - zoneB;\n  }\n\n  // Pokud jsou ve STEJNÉ zóně (např. oba jsou 0-1 km daleko),\n  // rozhoduje kompetence (1 je nejlepší, 5 nejhorší)\n  return a.kompetence_hodnota - b.kompetence_hodnota;\n});\n\n// Výstup\nreturn results[0];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1184,
+        592
+      ],
+      "id": "1f8899d7-f36f-443a-bd35-a060c6fb738b",
+      "name": "Code in JavaScript"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1cLqTUhKt7U0XvynAvZi0k-GD7xRq0MkCf0BOpjg5Z3c",
+          "mode": "list",
+          "cachedResultName": "Makleri HHMG leady",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cLqTUhKt7U0XvynAvZi0k-GD7xRq0MkCf0BOpjg5Z3c/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "List 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1cLqTUhKt7U0XvynAvZi0k-GD7xRq0MkCf0BOpjg5Z3c/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Datum": "={{ $now.format('yyyy-MM-dd') }}  ",
+            "Stav": "Předáno",
+            "Jméno": "=doplnit",
+            "Telefonní číslo": "={{ $('Edit Fields').first().json.telefonni_cislo }}",
+            "E-mail": "=doplnit",
+            "Typ nemovitosti": "={{ $('Edit Fields').first().json.typ_nemovitosti }}",
+            "Makléř": "={{ $json['Jméno']+ \" \" + $json['Příjmení'] }}",
+            "Předáno datum": "Doplnit",
+            "Předáno": "Doplnit",
+            "Lokalita": "={{ $('Message a model').first().json.output[0].content[0].text.adresa_nemovitosti }}",
+            "Ověřeno datum": "Doplnit",
+            "Zdroj": "Doplnit"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Datum",
+              "displayName": "Datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Stav",
+              "displayName": "Stav",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Jméno",
+              "displayName": "Jméno",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Přijmení",
+              "displayName": "Přijmení",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "Telefonní číslo",
+              "displayName": "Telefonní číslo",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "E-mail",
+              "displayName": "E-mail",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Předáno datum",
+              "displayName": "Předáno datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Předáno",
+              "displayName": "Předáno",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Ověřeno datum",
+              "displayName": "Ověřeno datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Makléř",
+              "displayName": "Makléř",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Zdroj",
+              "displayName": "Zdroj",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lokalita",
+              "displayName": "Lokalita",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Typ nemovitosti",
+              "displayName": "Typ nemovitosti",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Typ obchodu",
+              "displayName": "Typ obchodu",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Pobočka",
+              "displayName": "Pobočka",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Kontaktován datum",
+              "displayName": "Kontaktován datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Kontaktován",
+              "displayName": "Kontaktován",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Bude prodávat datum",
+              "displayName": "Bude prodávat datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Bude prodávat",
+              "displayName": "Bude prodávat",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Schůzka domluvena datum",
+              "displayName": "Schůzka domluvena datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Schůzka domlucena",
+              "displayName": "Schůzka domlucena",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Schůzka proběhla datum",
+              "displayName": "Schůzka proběhla datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Schůzla proběhla",
+              "displayName": "Schůzla proběhla",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Příští kontakt datum",
+              "displayName": "Příští kontakt datum",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Kontaktovat příště",
+              "displayName": "Kontaktovat příště",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        1392,
+        592
+      ],
+      "id": "9bdb75f4-0401-4a0a-9bd0-56bda84400e6",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "EqyiUzUpit2fP5dy",
+          "name": "Google Sheets account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "sendTo": "remax4youleady@gmail.com",
+        "subject": "Lead",
+        "message": "=Ahoj, máš nový lead na adrese: {{ $node[\"Edit Fields\"].json.adresa_nemovitosti }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        1600,
+        592
+      ],
+      "id": "1288da0e-7128-4a2f-aee4-ecdb4fb93c91",
+      "name": "Send a message",
+      "webhookId": "56991fa5-7ad5-402f-89d9-d2306026ad74",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "d9uS0wuXAC9KHQFC",
+          "name": "Gmail account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "chatId": "5795961720",
+        "text": "=Máš nový lead! 📍 {{ $('Edit Fields').first().json.adresa_nemovitosti }}",
+        "additionalFields": {
+          "appendAttribution": false
+        }
+      },
+      "type": "n8n-nodes-base.telegram",
+      "typeVersion": 1.2,
+      "position": [
+        1808,
+        592
+      ],
+      "id": "34b25d5f-feef-4a47-afe7-e62b7c91fbe2",
+      "name": "Send a text message",
+      "webhookId": "e847144c-b23c-46e3-9fc1-b9b212dd1bb4",
+      "credentials": {
+        "telegramApi": {
+          "id": "GwtFVFKKm6TROR1w",
+          "name": "Telegram account"
+        }
+      }
+    }
+  ],
+  "pinData": {
+    "Email Trigger (IMAP)": [
+      {
+        "json": {
+          "obsah": "Máte novou zprávu z šéfbota!\n\nTranskript chatu:\n\nURL: https://remax4you.cz/…U6w \n\nVyužijte službu nacenění nemovitosti zdarma. Na vaše telefonní číslo vám po ověření přijde SMS s naceněním nemovitosti. Stačí zadat 5 základních údajů.\n\nUveďte prosím adresu nemovitosti pro nacenění:\n\nBrněnská, 139, Hrotovice\n\nBudeme opravdu naceňovat nemovitost na této adrese?\n\nAno, pokračovat\n\nO jaký typ nemovitosti se jedná?\n\nDům\n\nJaká je obytná plocha v m²?\n\n64 m²\n\nJaká je velikost pozemku v m²?\n\n1012 m²\n\nMáte samostatnou kuchyň?\n\nAno\n\nKolik má nemovitost místností? (Samostatná kuchyň se nepočítá jako místnost.)\n\n3\n\nCenu nemovitosti vám zašleme do SMS. Nejprve ale potřebujeme vaše číslo ověřit.\nUveďte prosím telefonní číslo, na které vám zašleme ověřovací SMS.\n\n603501049\n\n4682\n\nDorazila vám ověřovací SMS?\n\nAno\n\nZadejte prosím kód níže:\n\n4682\n\n2\n\nVerifikace proběhla úspěšně.\n\nBěhem několika okamžiků vám přijde nacenění nemovitosti formou SMS.\n\nHrubý odhad ceny nemovitosti: 5 560 200,00 CZK. Minimální cena prodávaných nemovitostí v okolí: 4 076 100,00 CZK. V okolí se nejvíce prodala nemovitost za: 7 887 000,00 CZK."
+        }
+      }
+    ]
+  },
+  "connections": {
+    "Email Trigger (IMAP)": {
+      "main": [
+        [
+          {
+            "node": "Message a model",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Message a model": {
+      "main": [
+        [
+          {
+            "node": "Edit Fields",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit Fields": {
+      "main": [
+        [
+          {
+            "node": "HTTP Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code Tool": {
+      "ai_tool": [
+        []
+      ]
+    },
+    "HTTP Request": {
+      "main": [
+        [
+          {
+            "node": "Makléři",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Makléři": {
+      "main": [
+        [
+          {
+            "node": "Code in JavaScript",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Code in JavaScript": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Send a message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send a message": {
+      "main": [
+        [
+          {
+            "node": "Send a text message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "b03cd4bc-0407-430e-93fb-d0286d97e45a",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "4abfa536f4126e706cfc2402f5d52ec6d543b25d3347c78e69af5b692122d594"
+  },
+  "id": "nklgudCogj7d5bV3",
+  "tags": []
+}
